@@ -683,15 +683,19 @@ local unholyConfig = {
         summon_gargoyle = "summon_gargoyle",
         empower_rune_weapon = "empower_rune_weapon",
         bone_shield = "bone_shield",
+        death_and_decay = "death_and_decay",
     },
     baseCDs = {
         summon_gargoyle = 180,
         empower_rune_weapon = 300,
         bone_shield = 60,
+        -- death_and_decay omitted: its CD is Morbidity-dependent, so onCast sets
+        -- it from sim.dnd_cd instead of this flat table.
     },
     auras = {
         { up = "ff_up", remains = "ff_remains" },
         { up = "bp_up", remains = "bp_remains" },
+        { up = "desolation_up", remains = "desolation_remains" },
     },
     initState = function(sim, s)
         -- Runes + recovery timers
@@ -721,6 +725,15 @@ local unholyConfig = {
         sim.has_bone_shield = s.talent.bone_shield.rank > 0
         sim.in_unholy_presence = s.buff.unholy_presence.up
         sim.gargoyle_up = s.buff.summon_gargoyle.up
+
+        -- Death and Decay: 30s base, Morbidity shaves 5s/rank (15s at 3/3).
+        sim.dnd_cd = 30 - 5 * (s.talent.morbidity.rank or 0)
+
+        -- Desolation: Blood Strike grants a 20s 5% damage buff (Reaping turns the
+        -- spent Blood rune into a Death rune for later Scourge Strikes).
+        sim.has_desolation = s.talent.desolation.rank > 0
+        sim.desolation_up = s.buff.desolation.up
+        sim.desolation_remains = s.buff.desolation.remains
     end,
     getPriority = function(sim, recs)
         -- Unholy DPS wants Unholy Presence
@@ -738,18 +751,37 @@ local unholyConfig = {
             return "plague_strike"
         end
 
+        -- Desolation upkeep: Blood Strike keeps the 5% damage buff rolling.
+        -- Higher priority than the rune-pooling gates below because losing the
+        -- buff costs more than holding a Blood rune for Death and Decay.
+        if sim.has_desolation and not sim.desolation_up and canAfford(sim, 1, 0, 0) then
+            return "blood_strike"
+        end
+
         -- Summon Gargoyle (major CD)
         if sim.has_gargoyle and sim:ready("summon_gargoyle") and not DH:IsSnoozed("summon_gargoyle") and sim.rp >= 60 then
             return "summon_gargoyle"
         end
 
+        -- Death and Decay on cooldown — core Unholy ability (1 Blood + 1 Frost +
+        -- 1 Unholy). Cast as soon as it is ready and both diseases are up.
+        if sim:ready("death_and_decay") and diseasesUp(sim) and canAfford(sim, 1, 1, 1) then
+            return "death_and_decay"
+        end
+
+        -- Pool runes for the next Death and Decay when it is about to come off
+        -- cooldown (within ~6s, matching the wowsims DW Unholy APL). While pooling
+        -- we skip rune spenders and dump Runic Power via Death Coil / Horn instead.
+        local dndSoon = sim:remains("death_and_decay") <= 6
+
         -- Scourge Strike (main damage, Frost+Unholy) - only with diseases
-        if sim.has_scourge_strike and diseasesUp(sim) and canAfford(sim, 0, 1, 1) then
+        if sim.has_scourge_strike and diseasesUp(sim) and canAfford(sim, 0, 1, 1)
+            and not dndSoon then
             return "scourge_strike"
         end
 
         -- Blood Strike (Blood rune spender, converts to Death runes)
-        if canAfford(sim, 1, 0, 0) then
+        if canAfford(sim, 1, 0, 0) and not dndSoon then
             return "blood_strike"
         end
 
@@ -792,6 +824,13 @@ local unholyConfig = {
             spendRunesTracked(sim, 0, 1, 1, 15)
         elseif key == "blood_strike" then
             spendRunesTracked(sim, 1, 0, 0, 10)
+            if sim.has_desolation then
+                sim.desolation_up = true
+                sim.desolation_remains = 20
+            end
+        elseif key == "death_and_decay" then
+            spendRunesTracked(sim, 1, 1, 1, 15)
+            sim.cd.death_and_decay = sim.dnd_cd
         elseif key == "death_coil" then
             if not sim.sudden_doom then
                 spendRP(sim, 40)

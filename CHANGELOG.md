@@ -2,6 +2,11 @@
 
 All notable changes to PriorityHelper will be documented in this file.
 
+## [2.0.3] - 2026-06-25
+
+### Fixed
+- **Unholy DK: Death and Decay missing from rotation** ([#2](https://github.com/blinkysc/PriorityHelper/issues/2)). DnD is now recommended on cooldown (1 Blood + 1 Frost + 1 Unholy rune, diseases up), with its cooldown Morbidity-adjusted (30s − 5s/rank). Frost/Unholy/Blood runes are now pooled when DnD is within ~6s of coming off cooldown, matching the wowsims DW Unholy (Scourge Strike) APL. Added Desolation upkeep via Blood Strike to keep the 5% damage buff rolling.
+
 ## [2.0.0] - 2026-03-22
 
 ### Added
